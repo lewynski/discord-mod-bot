@@ -12,6 +12,7 @@ class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.action_gif = "https://i.imgur.com/dFtSKYS.gif"
+        self.role_gif = "https://i.imgur.com/DDVWx5G.gif"
 
     # --- ERROR HANDLER ---
     async def cog_command_error(self, ctx, error):
@@ -19,26 +20,68 @@ class Moderation(commands.Cog):
             embed = discord.Embed(
                 title="☁️ Oh! Just a second...",
                 description="This sunny power is only for the server's special friends! (๑ > ▽ <) ",
-                color=0xFFE4B5 # Soft Gold
+                color=0xFFE4B5 
             )
             embed.set_footer(text="Ensoleille • Keeping our skies bright.")
             await ctx.send(embed=embed, delete_after=10)
+
+    # --- ROLE COMMAND (NEW) ---
+    @commands.command()
+    @commands.has_any_role(*ADMIN_ROLE_IDS)
+    async def role(self, ctx, role_input: str, member: discord.Member):
+        # 1. Look for the role (by ID, Mention, or Name case-insensitive)
+        role = None
+        
+        # Try finding by ID or mention first
+        if role_input.startswith("<@&") and role_input.endswith(">"):
+            role_id = int(role_input[3:-1])
+            role = ctx.guild.get_role(role_id)
+        elif role_input.isdigit():
+            role = ctx.guild.get_role(int(role_input))
+        
+        # If not found yet, search by name (case-insensitive)
+        if not role:
+            role = discord.utils.find(lambda r: r.name.lower() == role_input.lower(), ctx.guild.roles)
+
+        if not role:
+            return await ctx.send(f"❌ I couldn't find a role named '{role_input}' in my sunny garden!")
+
+        # 2. Toggle the role
+        if role in member.roles:
+            await member.remove_roles(role)
+            title_text = "✨ Ensoleille | Lightening the load"
+            desc_text = f"The **{role.name}** role has been gently taken back from **{member.name}**."
+            color_hex = 0xFFB6C1 # Light Pink
+        else:
+            await member.add_roles(role)
+            title_text = "🌟 Ensoleille | A new sparkle"
+            desc_text = f"**{member.name}** has been gifted the **{role.name}** role! It looks great on them."
+            color_hex = 0xFFF0F5 # Lavender Blush
+
+        # 3. Send the aesthetic embed
+        embed = discord.Embed(
+            title=title_text,
+            description=desc_text,
+            color=color_hex
+        )
+        embed.set_thumbnail(url=self.role_gif)
+        embed.add_field(name="Sunny Friend", value=ctx.author.mention, inline=True)
+        embed.set_footer(text="“Every little change makes our world more colorful.”")
+        await ctx.send(embed=embed)
 
     # --- KICK COMMAND ---
     @commands.command()
     @commands.has_any_role(*ADMIN_ROLE_IDS)
     async def kick(self, ctx, member: discord.Member, *, reason="No reason provided"):
         await member.kick(reason=reason)
-        
         embed = discord.Embed(
             title="🌻 Ensoleille | A sweet farewell",
             description=f"**{member.name}** was carried away by a gentle breeze. We wish them well!",
-            color=0xFFD700 # Gold
+            color=0xFFD700
         )
         embed.add_field(name="Note", value=f"```\n{reason}\n```", inline=False)
         embed.add_field(name="Sunny Friend", value=ctx.author.mention, inline=True)
         embed.set_thumbnail(url=self.action_gif)
-        
         embed.set_footer(text="“Keep your face to the sunshine and you cannot see a shadow.”")
         await ctx.send(embed=embed)
 
@@ -47,16 +90,14 @@ class Moderation(commands.Cog):
     @commands.has_any_role(*ADMIN_ROLE_IDS)
     async def ban(self, ctx, member: discord.Member, *, reason="No reason provided"):
         await member.ban(reason=reason)
-        
         embed = discord.Embed(
             title="☀️ Ensoleille | A long rest",
             description=f"**{member.name}** has reached their sunset here. They are tucked away from our fields now.",
-            color=0xFFA500 # Orange
+            color=0xFFA500
         )
         embed.add_field(name="Note", value=f"```\n{reason}\n```", inline=False)
         embed.add_field(name="Sunny Friend", value=ctx.author.mention, inline=True)
         embed.set_thumbnail(url=self.action_gif)
-        
         embed.set_footer(text="“Even the longest day eventually reaches its sunset.”")
         await ctx.send(embed=embed)
 
@@ -68,10 +109,9 @@ class Moderation(commands.Cog):
         for ban_entry in banned_users:
             if ban_entry.user.name == member_name:
                 await ctx.guild.unban(ban_entry.user)
-                
                 embed = discord.Embed(
                     description=f"☁️ **{ban_entry.user.name}** is back! The clouds have cleared for a new morning.",
-                    color=0x87CEEB # Sky Blue
+                    color=0x87CEEB
                 )
                 embed.set_footer(text="“No matter how long the night, the dawn will always break.”")
                 await ctx.send(embed=embed)
@@ -84,9 +124,9 @@ class Moderation(commands.Cog):
         embed = discord.Embed(
             title="✨ Ensoleille | Warm Wishes",
             description="Here are the ways we keep our home bright and happy!",
-            color=0xFFFFE0 # Light Yellow
+            color=0xFFFFE0
         )
-        embed.add_field(name="Our tools", value="`*kick` • `*ban` • `*unban` • `*help` ", inline=False)
+        embed.add_field(name="Our tools", value="`*role` • `*kick` • `*ban` • `*unban` • `*help` ", inline=False)
         embed.set_footer(text="“Let's stay warm and kind to one another today!”")
         await ctx.send(embed=embed)
 
