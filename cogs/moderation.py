@@ -5,6 +5,32 @@ class Moderation(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    # The Custom Help Command
+    @commands.command()
+    async def help(self, ctx):
+        embed = discord.Embed(
+            title="🛡️ Bot Command Dock",
+            description="Here are the tools available for moderators. Prefix: `*` ",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(
+            name="🛠️ Moderation",
+            value="`*kick @user [reason]` - Kicks a member.\n"
+                  "`*ban @user [reason]` - Bans a member.\n"
+                  "`*unban User#0000` - Unbans a member.",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="ℹ️ Info",
+            value="`*help` - Shows this menu.",
+            inline=False
+        )
+
+        embed.set_footer(text="Aegis Moderation System | Powered by Render")
+        await ctx.send(embed=embed)
+
     # Kick Command
     @commands.command()
     @commands.has_permissions(kick_members=True)
