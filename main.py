@@ -8,6 +8,9 @@ from aiohttp import web
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='*', intents=intents)
 
+# ADD THIS LINE:
+bot.remove_command('help')
+
 # 2. Render Health Check (The Heartbeat)
 async def handle(request):
     return web.Response(text="Bot is online and healthy!")
