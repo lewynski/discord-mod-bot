@@ -21,10 +21,33 @@ class Moderation(commands.Cog):
             embed = discord.Embed(
                 title="☁️ Oh! Just a second...",
                 description="This sunny power is only for the server's special friends! (๑ > ▽ <) ",
-                color=0xFFE4B5
+                color=0xFFE4B5 
             )
             embed.set_footer(text="Ensoleille • Keeping our skies bright.")
             await ctx.send(embed=embed, delete_after=10)
+
+    # --- POST COMMAND (NEW) ---
+    @commands.hybrid_command(name="post", description="Share some sunshine in another channel!")
+    @commands.has_any_role(*ADMIN_ROLE_IDS)
+    @app_commands.describe(channel="Where should the message go?", message="What would you like to say?")
+    async def post(self, ctx, channel: discord.TextChannel, *, message: str):
+        # 1. Send the message to the target channel
+        try:
+            await channel.send(message)
+            
+            # 2. Send a cute confirmation to the admin
+            embed = discord.Embed(
+                title="✨ Ensoleille | Spreading the warmth",
+                description=f"Your message has been delivered to {channel.mention}! 🌻",
+                color=0xFAFAD2 # Light Goldenrod Yellow
+            )
+            embed.set_footer(text="“A kind word is like a spring day.”")
+            
+            # We use ephemeral=True for slash commands so only the admin sees the confirmation
+            await ctx.send(embed=embed, ephemeral=True)
+            
+        except discord.Forbidden:
+            await ctx.send("❌ I don't have permission to visit that channel! (´；ω；`) ", ephemeral=True)
 
     # --- ROLE COMMAND ---
     @commands.hybrid_command(name="role", description="Gently give or take a role from a friend.")
@@ -32,8 +55,6 @@ class Moderation(commands.Cog):
     @app_commands.describe(role_input="The role name, ID, or tag", member="The friend to update")
     async def role(self, ctx, role_input: str, member: discord.Member):
         role = None
-        
-        # Finding the role
         if role_input.startswith("<@&") and role_input.endswith(">"):
             role_id = int(role_input[3:-1])
             role = ctx.guild.get_role(role_id)
@@ -120,7 +141,7 @@ class Moderation(commands.Cog):
             description="Here are the ways we keep our home bright and happy!",
             color=0xFFFFE0
         )
-        embed.add_field(name="Our tools", value="`*role` • `*kick` • `*ban` • `*unban` • `*help` ", inline=False)
+        embed.add_field(name="Our tools", value="`*post` • `*role` • `*kick` • `*ban` • `*unban` • `*help` ", inline=False)
         embed.set_footer(text="“Let's stay warm and kind to one another today!”")
         await ctx.send(embed=embed)
 
