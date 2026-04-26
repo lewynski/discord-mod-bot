@@ -39,6 +39,7 @@ async def main():
         # These MUST be indented exactly 8 spaces (2 levels in)
         await bot.load_extension('cogs.moderation')
         await bot.load_extension('cogs.fun')
+        await bot.load_extension('cogs.welcome')
         
         token = os.environ.get('DISCORD_TOKEN')
         await bot.start(token)
