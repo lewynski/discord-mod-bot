@@ -9,6 +9,9 @@ from aiohttp import web
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='*', intents=intents, help_command=None)
 
+# ADD THIS LINE TO LOAD THE FUN TOOLS:
+        await bot.load_extension('cogs.fun')
+
 # 2. Ensoleille Heartbeat (For Render & Cron-job.org)
 async def handle(request):
     return web.Response(text="Ensoleille is shining! ☀️")
