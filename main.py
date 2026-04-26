@@ -6,8 +6,8 @@ from aiohttp import web
 
 # 1. Setup Intents and Bot
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix='*', intents=intents)
-
+# This tells the bot "Don't create a default help command at all"
+bot = commands.Bot(command_prefix='*', intents=intents, help_command=None)
 # ADD THIS LINE:
 bot.remove_command('help')
 
