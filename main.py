@@ -40,6 +40,7 @@ async def main():
         await bot.load_extension('cogs.moderation')
         await bot.load_extension('cogs.fun')
         await bot.load_extension('cogs.welcome')
+        await bot.load_extension('cogs.afk')
         
         token = os.environ.get('DISCORD_TOKEN')
         await bot.start(token)
