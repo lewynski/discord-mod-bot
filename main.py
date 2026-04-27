@@ -41,6 +41,7 @@ async def main():
         await bot.load_extension('cogs.fun')
         await bot.load_extension('cogs.welcome')
         await bot.load_extension('cogs.afk')
+        await bot.load_extension('cogs.games')
         
         token = os.environ.get('DISCORD_TOKEN')
         await bot.start(token)
