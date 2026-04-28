@@ -1,35 +1,39 @@
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import datetime
 import time
 import random
-import aiosqlite
-import asyncio
+
+# The Role IDs you provided for staff protection
+ADMIN_ROLE_IDS = [
+    1496909970464178248,
+    1497441701701095615,
+    1497234157275840692
+]
 
 class GiveawayView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None) # No timeout so button stays active
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
 
     @discord.ui.button(label="Enter", style=discord.ButtonStyle.green, emoji="🎁", custom_id="enter_giveaway")
     async def enter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        async with aiosqlite.connect("giveaways.db") as db:
-            # Check if user already entered
-            cursor = await db.execute("SELECT entries FROM giveaways WHERE message_id = ?", (interaction.message.id,))
-            row = await cursor.fetchone()
-            
-            if not row:
-                return await interaction.response.send_message("☁️ This giveaway seems to have ended!", ephemeral=True)
-            
-            entries = row[0].split(",") if row[0] else []
-            if str(interaction.user.id) in entries:
-                return await interaction.response.send_message("🌻 You've already joined this sunshine drop!", ephemeral=True)
-            
-            entries.append(str(interaction.user.id))
-            await db.execute("UPDATE giveaways SET entries = ? WHERE message_id = ?", (",".join(entries), interaction.message.id))
-            await db.commit()
-            
-            await interaction.response.send_message("✨ You've entered! Good luck, sunny friend!", ephemeral=True)
+        db = self.bot.db.giveaways
+        giveaway = await db.find_one({"message_id": interaction.message.id})
+        
+        if not giveaway:
+            return await interaction.response.send_message("☁️ This giveaway is no longer active!", ephemeral=True)
+        
+        if interaction.user.id in giveaway["entries"]:
+            return await interaction.response.send_message("🌻 You've already joined this sunshine drop!", ephemeral=True)
+        
+        # Add user ID to the list in Mongo
+        await db.update_one(
+            {"message_id": interaction.message.id},
+            {"$push": {"entries": interaction.user.id}}
+        )
+        
+        await interaction.response.send_message("✨ You've entered! Good luck, sunny friend!", ephemeral=True)
 
 class Giveaway(commands.GroupCog, name="giveaway"):
     def __init__(self, bot):
@@ -37,40 +41,24 @@ class Giveaway(commands.GroupCog, name="giveaway"):
         self.check_giveaways.start()
 
     async def cog_load(self):
-        # Create database table if it doesn't exist
-        async with aiosqlite.connect("giveaways.db") as db:
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS giveaways (
-                    message_id INTEGER PRIMARY KEY,
-                    channel_id INTEGER,
-                    end_time REAL,
-                    prize TEXT,
-                    winners INTEGER,
-                    entries TEXT,
-                    thumbnail TEXT,
-                    image TEXT
-                )
-            """)
-            await db.commit()
-        self.bot.add_view(GiveawayView()) # Register the button globally
+        # Keep the button active even after a bot restart
+        self.bot.add_view(GiveawayView(self.bot))
 
     def cog_unload(self):
         self.check_giveaways.cancel()
 
-    # --- START GIVEAWAY ---
+    # --- START COMMAND (Staff Only) ---
     @app_commands.command(name="start", description="Start a sunny giveaway drop!")
-    @app_commands.describe(
-        duration="How long? (e.g. 10m, 1h, 1d)",
-        winners="Number of winners",
-        prize="What is the prize?",
-        thumbnail="Optional side image URL",
-        image="Optional bottom image URL"
-    )
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     async def start(self, interaction: discord.Interaction, duration: str, winners: int, prize: str, thumbnail: str = None, image: str = None):
-        # Convert duration to seconds
-        amount = int(duration[:-1])
-        unit = duration[-1].lower()
-        seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+        # Convert duration (e.g., 10m, 1h) to seconds
+        try:
+            amount = int(duration[:-1])
+            unit = duration[-1].lower()
+            seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+        except:
+            return await interaction.response.send_message("❌ Please use a valid time format like `10m`, `1h`, or `1d`!", ephemeral=True)
+
         end_time = time.time() + seconds
 
         embed = discord.Embed(
@@ -83,59 +71,73 @@ class Giveaway(commands.GroupCog, name="giveaway"):
         embed.set_footer(text=f"{winners} Winner(s) • Good luck! ✨")
 
         await interaction.response.send_message("☀️ Creating the giveaway...", ephemeral=True)
-        msg = await interaction.channel.send(embed=embed, view=GiveawayView())
+        msg = await interaction.channel.send(embed=embed, view=GiveawayView(self.bot))
 
-        async with aiosqlite.connect("giveaways.db") as db:
-            await db.execute(
-                "INSERT INTO giveaways (message_id, channel_id, end_time, prize, winners, entries, thumbnail, image) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (msg.id, interaction.channel.id, end_time, prize, winners, "", thumbnail, image)
-            )
-            await db.commit()
+        # Save to MongoDB
+        await self.bot.db.giveaways.insert_one({
+            "message_id": msg.id,
+            "channel_id": interaction.channel.id,
+            "end_time": end_time,
+            "prize": prize,
+            "winners_count": winners,
+            "entries": [],
+            "thumbnail": thumbnail,
+            "image": image
+        })
 
-    # --- STOP GIVEAWAY ---
+    # --- STOP COMMAND (Staff Only) ---
     @app_commands.command(name="stop", description="End a giveaway early.")
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     async def stop(self, interaction: discord.Interaction, message_id: str):
-        async with aiosqlite.connect("giveaways.db") as db:
-            await db.execute("UPDATE giveaways SET end_time = ? WHERE message_id = ?", (time.time(), int(message_id)))
-            await db.commit()
-        await interaction.response.send_message("🌅 Ending the giveaway now...", ephemeral=True)
+        result = await self.bot.db.giveaways.update_one(
+            {"message_id": int(message_id)},
+            {"$set": {"end_time": time.time()}}
+        )
+        if result.modified_count > 0:
+            await interaction.response.send_message("🌅 Ending the giveaway now...", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ I couldn't find a giveaway with that message ID.", ephemeral=True)
 
-    # --- BACKGROUND TASK ---
+    # --- BACKGROUND CHECKER ---
     @tasks.loop(seconds=10)
     async def check_giveaways(self):
         now = time.time()
-        async with aiosqlite.connect("giveaways.db") as db:
-            cursor = await db.execute("SELECT * FROM giveaways WHERE end_time <= ?", (now,))
-            ended = await cursor.fetchall()
+        db = self.bot.db.giveaways
+        
+        cursor = db.find({"end_time": {"$lte": now}})
+        async for g in cursor:
+            channel = self.bot.get_channel(g["channel_id"])
+            if not channel: continue
             
-            for g in ended:
-                msg_id, chan_id, _, prize, winner_count, entries_str, thumb, img = g
-                channel = self.bot.get_channel(chan_id)
-                if not channel: continue
-                
-                try:
-                    msg = await channel.fetch_message(msg_id)
-                except: continue
+            try:
+                msg = await channel.fetch_message(g["message_id"])
+            except: 
+                await db.delete_one({"_id": g["_id"]})
+                continue
 
-                entries = entries_str.split(",") if entries_str else []
-                
-                if len(entries) == 0:
-                    description = "Nobody entered the giveaway... the sun went down. ☁️"
-                else:
-                    winners = random.sample(entries, min(len(entries), winner_count))
-                    winner_mentions = ", ".join([f"<@{w}>" for w in winners])
-                    description = f"Congratulations {winner_mentions}! You won the **{prize}**! ☀️"
+            entries = g["entries"]
+            if not entries:
+                result_text = "Nobody entered the giveaway... the sun went down. ☁️"
+            else:
+                winners = random.sample(entries, min(len(entries), g["winners_count"]))
+                mentions = ", ".join([f"<@{w}>" for w in winners])
+                result_text = f"Congratulations {mentions}! You won the **{g['prize']}**! ☀️"
 
-                end_embed = discord.Embed(title="🎁 GIVEAWAY ENDED", description=description, color=0x808080)
-                if thumb: end_embed.set_thumbnail(url=thumb)
-                if img: end_embed.set_image(url=img)
-                end_embed.set_footer(text="Ensoleille | Better luck next time!")
-                
-                await msg.edit(embed=end_embed, view=None)
-                await channel.send(f"🎊 {description}" if len(entries) > 0 else "☁️ Nobody won the giveaway.")
-                
-                await db.execute("DELETE FROM giveaways WHERE message_id = ?", (msg_id,))
-                await db.commit()
+            end_embed = discord.Embed(title="🎁 GIVEAWAY ENDED", description=result_text, color=0x808080)
+            if g["thumbnail"]: end_embed.set_thumbnail(url=g["thumbnail"])
+            if g["image"]: end_embed.set_image(url=g["image"])
+            
+            await msg.edit(embed=end_embed, view=None)
+            await channel.send(f"🎊 {result_text}")
+            
+            await db.delete_one({"_id": g["_id"]})
+
+    # Error handler for Staff IDs
+    @start.error
+    @stop.error
+    async def giveaway_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.errors.MissingAnyRole):
+            await interaction.response.send_message("☁️ Only server staff with sunny powers can start giveaways! (๑ > ▽ <) ", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(Giveaway(bot))
