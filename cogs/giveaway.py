@@ -4,7 +4,7 @@ from discord import app_commands
 import time
 import random
 
-# The Role IDs you provided
+# The Staff Role IDs
 ADMIN_ROLE_IDS = [
     1496909970464178248,
     1497441701701095615,
@@ -16,14 +16,13 @@ class GiveawayView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
-    # --- BUTTON 1: JOIN ---
     @discord.ui.button(label="Enter", style=discord.ButtonStyle.green, emoji="🎁", custom_id="enter_giveaway")
     async def enter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         db = self.bot.db.giveaways
         giveaway = await db.find_one({"message_id": interaction.message.id})
         
-        if not giveaway:
-            return await interaction.response.send_message("☁️ This giveaway is no longer active!", ephemeral=True)
+        if not giveaway or giveaway.get("ended"):
+            return await interaction.response.send_message("☁️ This giveaway has already ended!", ephemeral=True)
         
         if interaction.user.id in giveaway["entries"]:
             return await interaction.response.send_message("🌻 You've already joined this sunshine drop!", ephemeral=True)
@@ -32,37 +31,19 @@ class GiveawayView(discord.ui.View):
             {"message_id": interaction.message.id},
             {"$push": {"entries": interaction.user.id}}
         )
-        
-        await interaction.response.send_message("✨ You've entered! Good luck, sunny friend!", ephemeral=True)
+        await interaction.response.send_message("✨ You've entered! Good luck!", ephemeral=True)
 
-    # --- BUTTON 2: VIEW ENTRIES (New!) ---
     @discord.ui.button(label="View Entries", style=discord.ButtonStyle.gray, emoji="📜", custom_id="view_entries")
     async def entries_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         db = self.bot.db.giveaways
         giveaway = await db.find_one({"message_id": interaction.message.id})
-        
-        if not giveaway:
-            return await interaction.response.send_message("☁️ I can't find the entry list for this giveaway.", ephemeral=True)
+        if not giveaway: return
         
         entries = giveaway.get("entries", [])
-        
-        if not entries:
-            return await interaction.response.send_message("🎐 No one has entered yet. Be the first!", ephemeral=True)
-        
-        # Convert IDs to mentions
-        entry_list = ", ".join([f"<@{uid}>" for uid in entries])
-        
-        # Discord has a 2000 character limit for messages, so we handle long lists
-        if len(entry_list) > 1900:
-            entry_list = entry_list[:1900] + "... and more!"
+        entry_list = ", ".join([f"<@{uid}>" for uid in entries]) if entries else "No entries yet."
+        if len(entry_list) > 1900: entry_list = entry_list[:1900] + "..."
 
-        embed = discord.Embed(
-            title="🌸 Current Participants",
-            description=entry_list,
-            color=0xFFFACD
-        )
-        embed.set_footer(text=f"Total: {len(entries)} users")
-        
+        embed = discord.Embed(title="🌸 Participants", description=entry_list, color=0xFFFACD)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class Giveaway(commands.GroupCog, name="giveaway"):
@@ -73,43 +54,24 @@ class Giveaway(commands.GroupCog, name="giveaway"):
     async def cog_load(self):
         self.bot.add_view(GiveawayView(self.bot))
 
-    def cog_unload(self):
-        self.check_giveaways.cancel()
-
-    # --- UPDATED START COMMAND ---
-    @app_commands.command(name="start", description="Start a sunny giveaway drop!")
-    @app_commands.describe(
-        duration="Time (10m, 1h, 1d)",
-        winners="Number of winners",
-        prize="What is the prize?",
-        host="Who is hosting this? (Mention them)",
-        thumbnail="Direct Link for side GIF",
-        image="Direct Link for bottom GIF"
-    )
+    @app_commands.command(name="start", description="Start a giveaway.")
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     async def start(self, interaction: discord.Interaction, duration: str, winners: int, prize: str, host: discord.Member = None, thumbnail: str = None, image: str = None):
-        # Default host to the person running the command if none mentioned
         host_user = host if host else interaction.user
-        
-        try:
-            amount = int(duration[:-1])
-            unit = duration[-1].lower()
-            seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
-        except:
-            return await interaction.response.send_message("❌ Format error! Use `10m`, `1h`, or `1d`.", ephemeral=True)
-
+        amount = int(duration[:-1])
+        unit = duration[-1].lower()
+        seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
         end_time = time.time() + seconds
 
         embed = discord.Embed(
             title=f"🎁 ENSOLEILLE DROP | {prize}",
-            description=f"Click **Enter** to join!\nClick **View Entries** to see your competition! ☀️\n\n**Ends:** <t:{int(end_time)}:R>\n**Hosted by:** {host_user.mention}",
+            description=f"Click to join! ☀️\n**Ends:** <t:{int(end_time)}:R>\n**Hosted by:** {host_user.mention}",
             color=0xFFD700
         )
         if thumbnail: embed.set_thumbnail(url=thumbnail)
         if image: embed.set_image(url=image)
-        embed.set_footer(text=f"{winners} Winner(s) • Good luck! ✨")
 
-        await interaction.response.send_message("☀️ Creating the giveaway...", ephemeral=True)
+        await interaction.response.send_message("☀️ Creating...", ephemeral=True)
         msg = await interaction.channel.send(embed=embed, view=GiveawayView(self.bot))
 
         await self.bot.db.giveaways.insert_one({
@@ -121,44 +83,64 @@ class Giveaway(commands.GroupCog, name="giveaway"):
             "entries": [],
             "thumbnail": thumbnail,
             "image": image,
-            "host_id": host_user.id
+            "host_id": host_user.id,
+            "ended": False
         })
+
+    # --- NEW REROLL COMMAND ---
+    @app_commands.command(name="reroll", description="Pick a new winner from an ended giveaway.")
+    @app_commands.describe(message_id="The ID of the giveaway message")
+    @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
+    async def reroll(self, interaction: discord.Interaction, message_id: str):
+        db = self.bot.db.giveaways
+        giveaway = await db.find_one({"message_id": int(message_id)})
+
+        if not giveaway:
+            return await interaction.response.send_message("❌ Giveaway not found in database.", ephemeral=True)
+        
+        if not giveaway.get("ended"):
+            return await interaction.response.send_message("☁️ That giveaway hasn't ended yet! Use `/giveaway stop` first.", ephemeral=True)
+
+        entries = giveaway.get("entries", [])
+        if not entries:
+            return await interaction.response.send_message("🎐 No entries found to reroll from.", ephemeral=True)
+
+        winner = random.choice(entries)
+        
+        reroll_embed = discord.Embed(
+            title="🎊 New Winner Rerolled!",
+            description=f"The sun has chosen a new winner for **{giveaway['prize']}**!\n\nCongratulations <@{winner}>! ☀️",
+            color=0xFFA500
+        )
+        await interaction.channel.send(content=f"✨ **Reroll Result:** <@{winner}>", embed=reroll_embed)
+        await interaction.response.send_message("Successfully rerolled!", ephemeral=True)
 
     @app_commands.command(name="stop", description="End a giveaway early.")
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
     async def stop(self, interaction: discord.Interaction, message_id: str):
-        result = await self.bot.db.giveaways.update_one(
-            {"message_id": int(message_id)},
-            {"$set": {"end_time": time.time()}}
-        )
-        if result.modified_count > 0:
-            await interaction.response.send_message("🌅 Ending the giveaway now...", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Message ID not found.", ephemeral=True)
+        await self.bot.db.giveaways.update_one({"message_id": int(message_id)}, {"$set": {"end_time": time.time()}})
+        await interaction.response.send_message("🌅 Ending now...", ephemeral=True)
 
     @tasks.loop(seconds=10)
     async def check_giveaways(self):
         now = time.time()
         db = self.bot.db.giveaways
-        cursor = db.find({"end_time": {"$lte": now}})
+        cursor = db.find({"end_time": {"$lte": now}, "ended": False})
+        
         async for g in cursor:
             channel = self.bot.get_channel(g["channel_id"])
             if not channel: continue
             try:
                 msg = await channel.fetch_message(g["message_id"])
-            except: 
-                await db.delete_one({"_id": g["_id"]})
-                continue
+            except: continue
 
             entries = g["entries"]
-            host_mention = f"<@{g['host_id']}>" if "host_id" in g else "The Staff Team"
-            
             if not entries:
-                result_text = "Nobody entered the giveaway... the sun went down. ☁️"
+                result_text = "No one entered... ☁️"
             else:
                 winners = random.sample(entries, min(len(entries), g["winners_count"]))
                 mentions = ", ".join([f"<@{w}>" for w in winners])
-                result_text = f"Congratulations {mentions}! You won the **{g['prize']}**! ☀️\nHosted by: {host_mention}"
+                result_text = f"Congratulations {mentions}! You won **{g['prize']}**! ☀️"
 
             end_embed = discord.Embed(title="🎁 GIVEAWAY ENDED", description=result_text, color=0x808080)
             if g["thumbnail"]: end_embed.set_thumbnail(url=g["thumbnail"])
@@ -166,13 +148,9 @@ class Giveaway(commands.GroupCog, name="giveaway"):
             
             await msg.edit(embed=end_embed, view=None)
             await channel.send(f"🎊 {result_text}")
-            await db.delete_one({"_id": g["_id"]})
-
-    @start.error
-    @stop.error
-    async def giveaway_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
-        if isinstance(error, app_commands.errors.MissingAnyRole):
-            await interaction.response.send_message("☁️ Only staff can start giveaways! (๑ > ▽ <) ", ephemeral=True)
+            
+            # CHANGE: We mark it as ended instead of deleting it!
+            await db.update_one({"_id": g["_id"]}, {"$set": {"ended": True}})
 
 async def setup(bot):
     await bot.add_cog(Giveaway(bot))
