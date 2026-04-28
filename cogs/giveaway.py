@@ -16,6 +16,7 @@ class GiveawayView(discord.ui.View):
         super().__init__(timeout=None)
         self.bot = bot
 
+    # --- BUTTON 1: JOIN ---
     @discord.ui.button(label="Enter", style=discord.ButtonStyle.green, emoji="🎁", custom_id="enter_giveaway")
     async def enter_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         db = self.bot.db.giveaways
@@ -34,6 +35,36 @@ class GiveawayView(discord.ui.View):
         
         await interaction.response.send_message("✨ You've entered! Good luck, sunny friend!", ephemeral=True)
 
+    # --- BUTTON 2: VIEW ENTRIES (New!) ---
+    @discord.ui.button(label="View Entries", style=discord.ButtonStyle.gray, emoji="📜", custom_id="view_entries")
+    async def entries_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        db = self.bot.db.giveaways
+        giveaway = await db.find_one({"message_id": interaction.message.id})
+        
+        if not giveaway:
+            return await interaction.response.send_message("☁️ I can't find the entry list for this giveaway.", ephemeral=True)
+        
+        entries = giveaway.get("entries", [])
+        
+        if not entries:
+            return await interaction.response.send_message("🎐 No one has entered yet. Be the first!", ephemeral=True)
+        
+        # Convert IDs to mentions
+        entry_list = ", ".join([f"<@{uid}>" for uid in entries])
+        
+        # Discord has a 2000 character limit for messages, so we handle long lists
+        if len(entry_list) > 1900:
+            entry_list = entry_list[:1900] + "... and more!"
+
+        embed = discord.Embed(
+            title="🌸 Current Participants",
+            description=entry_list,
+            color=0xFFFACD
+        )
+        embed.set_footer(text=f"Total: {len(entries)} users")
+        
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
 class Giveaway(commands.GroupCog, name="giveaway"):
     def __init__(self, bot):
         self.bot = bot
@@ -45,21 +76,33 @@ class Giveaway(commands.GroupCog, name="giveaway"):
     def cog_unload(self):
         self.check_giveaways.cancel()
 
+    # --- UPDATED START COMMAND ---
     @app_commands.command(name="start", description="Start a sunny giveaway drop!")
+    @app_commands.describe(
+        duration="Time (10m, 1h, 1d)",
+        winners="Number of winners",
+        prize="What is the prize?",
+        host="Who is hosting this? (Mention them)",
+        thumbnail="Direct Link for side GIF",
+        image="Direct Link for bottom GIF"
+    )
     @app_commands.checks.has_any_role(*ADMIN_ROLE_IDS)
-    async def start(self, interaction: discord.Interaction, duration: str, winners: int, prize: str, thumbnail: str = None, image: str = None):
+    async def start(self, interaction: discord.Interaction, duration: str, winners: int, prize: str, host: discord.Member = None, thumbnail: str = None, image: str = None):
+        # Default host to the person running the command if none mentioned
+        host_user = host if host else interaction.user
+        
         try:
             amount = int(duration[:-1])
             unit = duration[-1].lower()
             seconds = amount * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
         except:
-            return await interaction.response.send_message("❌ Use formats like `10m`, `1h`, or `1d`!", ephemeral=True)
+            return await interaction.response.send_message("❌ Format error! Use `10m`, `1h`, or `1d`.", ephemeral=True)
 
         end_time = time.time() + seconds
 
         embed = discord.Embed(
             title=f"🎁 ENSOLEILLE DROP | {prize}",
-            description=f"Click the button below to enter!\n\n**Ends:** <t:{int(end_time)}:R>\n**Hosted by:** {interaction.user.mention}",
+            description=f"Click **Enter** to join!\nClick **View Entries** to see your competition! ☀️\n\n**Ends:** <t:{int(end_time)}:R>\n**Hosted by:** {host_user.mention}",
             color=0xFFD700
         )
         if thumbnail: embed.set_thumbnail(url=thumbnail)
@@ -77,7 +120,8 @@ class Giveaway(commands.GroupCog, name="giveaway"):
             "winners_count": winners,
             "entries": [],
             "thumbnail": thumbnail,
-            "image": image
+            "image": image,
+            "host_id": host_user.id
         })
 
     @app_commands.command(name="stop", description="End a giveaway early.")
@@ -107,12 +151,14 @@ class Giveaway(commands.GroupCog, name="giveaway"):
                 continue
 
             entries = g["entries"]
+            host_mention = f"<@{g['host_id']}>" if "host_id" in g else "The Staff Team"
+            
             if not entries:
-                result_text = "Nobody entered... the sun went down. ☁️"
+                result_text = "Nobody entered the giveaway... the sun went down. ☁️"
             else:
                 winners = random.sample(entries, min(len(entries), g["winners_count"]))
                 mentions = ", ".join([f"<@{w}>" for w in winners])
-                result_text = f"Congratulations {mentions}! You won the **{g['prize']}**! ☀️"
+                result_text = f"Congratulations {mentions}! You won the **{g['prize']}**! ☀️\nHosted by: {host_mention}"
 
             end_embed = discord.Embed(title="🎁 GIVEAWAY ENDED", description=result_text, color=0x808080)
             if g["thumbnail"]: end_embed.set_thumbnail(url=g["thumbnail"])
